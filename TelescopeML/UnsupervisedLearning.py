@@ -5,6 +5,7 @@ import os
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
+import joblib
 
 # Plotting Imports
 import matplotlib.pyplot as plt
@@ -22,9 +23,106 @@ from keras.models import Sequential, Model
 from keras.layers import Dense, BatchNormalization
 from keras.optimizers import Adam
 
+# GMM Imports
+from sklearn.mixture import GaussianMixture
+
 __reference_data_path__ = os.getenv("TelescopeML_reference_data")
 DEFAULT_ENCODER_PATH = os.path.join(__reference_data_path__, 'trained_ML_models/trained_weights_encoder_100epoch_20dimension.h5')
 DEFAULT_DECODER_PATH = os.path.join(__reference_data_path__, 'trained_ML_models/trained_weights_decoder_100epoch_20dimension.h5')
+
+
+class GMM:
+    def __init__(self, X_train, X_val, X_test,
+                       y_train, y_val, y_test):
+        """
+        Constructor for GMM class. X should be lower-dimension encoded space
+        """
+        self.X_train = X_train
+        self.X_val = X_val
+        self.X_test = X_test
+        self.y_train = y_train
+        self.y_val = y_val
+        self.y_test = y_test
+
+
+    def build_model(self, config):
+        """
+        Build GMM model from parameters given in config
+        """
+        n_components = config['n_components']           # Cluster count
+        covariance_type = config['covariance_type']     # full, tied, spherical, diag
+        max_iter = config['max_iter']                   # Max EM steps to do
+        n_init = config['n_init']                       # Number of initializations to make
+        verbose = config['verbose']
+
+        self.gmm = GaussianMixture(n_components, covariance_type=covariance_type, max_iter=max_iter, n_init=n_init, verbose=verbose)
+
+    
+    def calculate_expected_values(self):
+        """
+        Calculate expected values per cluster for an already-trained model
+        """
+        # use soft clustering to get average value for each cluster
+        responsibilities = self.gmm.predict_proba(self.X_train)
+        expected_outputs = np.zeros((self.gmm.n_components, self.y_train.shape[1]))
+
+        # for each component, get weighted sum of outputs and divide by full responsibility to get averages
+        for k in range(self.gmm.n_components):
+            weighted_sum = np.dot(responsibilities[:, k], self.y_train)
+            responsibility_sum = responsibilities[:, k].sum()
+            expected_outputs[k, :] = weighted_sum / responsibility_sum
+
+        # shape - (n_components, y_feature_count)
+        self.expected_outputs = expected_outputs
+
+
+    def train_model(self):
+        """
+        Fit GMM Model with existing train set, calculate & return expected outputs for each cluster
+        """
+        self.gmm.fit(self.X_train)
+
+        return self.calculate_expected_values()
+    
+
+    def predict(self, X_input):
+        """
+        Given an X input, predict the 4 output features (grav, c/o, metal, temp)
+        """
+        responsibilities = self.gmm.predict_proba(X_input)
+        estimated_Y = np.dot(responsibilities, self.expected_outputs)
+        return estimated_Y
+
+
+    def save_from_indicator(self, model_indicator: str):
+        """
+        Save model to reference data path given indicator
+        """
+        return self.save_to_path(os.path.join(__reference_data_path__, f'trained_ML_models/trained_gmm_{model_indicator}.pkl'))
+
+    
+    def load_from_indicator(self, model_indicator: str):
+        """
+        Load model from reference path given indicator
+        """
+        return self.load_from_path(os.path.join(__reference_data_path__, f'trained_ML_models/trained_gmm_{model_indicator}.pkl'))
+
+    
+    def save_to_path(self, path: str):
+        """
+        Save model to given path (using pickle object)
+        """
+        joblib.dump(self.gmm, path)
+        return path
+
+
+    def load_from_path(self, path: str):
+        """
+        Load GMM model from given path (pickle object)
+        """
+        self.gmm = joblib.load(path)
+        return self.calculate_expected_values()
+
 
 
 class Autoencoder:
@@ -109,7 +207,7 @@ class Autoencoder:
         self.decoder.save_weights(decoder_weights_path)
 
 
-    def load_from_indicator(self, model_indicator: str = '100epoch_20dimension'):
+    def load_from_indicator(self, model_indicator):
         """
         Load encoder & decoder from model name/indicator, like '100epoch_20dimension'
         """

@@ -1,9 +1,36 @@
+# Unsupervised learning models
+from TelescopeML.UnsupervisedLearning import *
+
+# Data processing
+from TelescopeML.DataMaster import *
+
+# Demo hosting foundation
 import streamlit as st
+
+# Data/math imports
 import pandas as pd
 import numpy as np
+
+# File imports
 import os
-from TelescopeML.UnsupervisedLearning import *
-from TelescopeML.DataMaster import *
+import tempfile
+import io
+import zipfile
+
+# =============
+# Instructions
+# =============
+#
+# 1. If you haven't already, make sure to run "pip install streamlit" for the necessary dependencies
+# 2. In the command prompt, run "streamlit run docs/tutorials/demo.py"
+# 3. This should open up a new tab with the demo website. From there you can explore the models of
+#    my unsupervised learning implementation through the dropdown menu.
+
+
+
+# --------------------------------------
+# ---    DATA PROCESSOR FUNCTIONS    ---
+# --------------------------------------
 
 
 def create_data_processor():
@@ -90,7 +117,12 @@ def dp_scale_x_y(data_processor: DataProcessor):
     return data_processor
 
 
-def initialize_pca(data_processor):
+# --------------------------------------
+# --------    PCA FUNCTIONS    ---------
+# --------------------------------------
+
+
+def initialize_pca(data_processor) -> PCAModel:
     """
     Build & fit PCA model to X train
     """
@@ -107,7 +139,12 @@ def initialize_pca(data_processor):
     return pca
 
 
-def initialize_autoencoder(data_processor):
+# --------------------------------------
+# ----    AUTOENCODER FUNCTIONS    -----
+# --------------------------------------
+
+
+def initialize_autoencoder(data_processor) -> Autoencoder:
     """
     Build & fit autoencoder model to X train
     """
@@ -130,10 +167,18 @@ def initialize_autoencoder(data_processor):
     return autoencoder
 
 
+
+# --------------------------------------
+# --------    DEMO HOME PAGE    --------
+# --------------------------------------
+
 """
 # Unsupervised Learning Visualized
 
 Abhinav Uppala
+
+*For each of these examples, we use a random test dataset value to show model's effectiveness. For more concrete results,
+download the model files and use the UnsupervisedLearning module from TelescopeML to load, train and test these models.*
 """
 
 # Initialize DataProcessor object
@@ -147,8 +192,17 @@ vis_dropdown = st.selectbox(label='Pick visualization',
                             index=None,
                             key='visualization')
 
+
+# --------------------------------------
+# -----    DEMO DROPDOWN PAGES    ------
+# --------------------------------------
+
 if st.session_state.get('visualization'):
     
+    # --------------------------------------
+    # -------------    PCA    --------------
+    # --------------------------------------
+
     if vis_dropdown == 'PCA':
         """
         ## PCA for Dimensionality Reduction
@@ -157,7 +211,8 @@ if st.session_state.get('visualization'):
         This specific model aims to preserve at least 99.9% of the variation in the training data. This demo shows its effectiveness by comparing a
         random test X value, along with the same PCA-compressed & reconstructed X value, demonstrating how features are preserved.
         """
-        pca = initialize_pca(data_processor)
+        with st.spinner('Initializing PCA...'):
+            pca = initialize_pca(data_processor)
         index = np.random.randint(data_processor.X_test_standardized_rowwise.shape[0])
 
         actual = data_processor.X_test_standardized_rowwise[index].reshape(1, -1)
@@ -170,6 +225,10 @@ if st.session_state.get('visualization'):
         ))
 
     
+    # --------------------------------------
+    # ---------    AUTOENCODER    ----------
+    # --------------------------------------
+
     elif vis_dropdown == 'Autoencoder':
         """
         ### Autoencoder for Dimensionality Reduction
@@ -179,7 +238,15 @@ if st.session_state.get('visualization'):
         a lower dimension (104 -> 20 in this case), we can perform dimensionality reduction while retaining the original features of the input. This demo showcases this
         by showing a randomly selected X value along with it's reconstruction from encoding & decoding.
         """
-        autoencoder = initialize_autoencoder(data_processor)
+        # Allow users to upload their own weights or train a new model
+        # because users who download the TelescopeML_project file won't have the
+        # model from my local machine
+        file_dropdown = st.selectbox(label='How to create model',
+                                     options=['Upload weights files', 'Train new model'],
+                                     index=None)
+
+        with st.spinner('Initializing Autoencoder...'):
+            autoencoder = initialize_autoencoder(data_processor)
         index = np.random.randint(data_processor.X_test_standardized_rowwise.shape[0])
 
         actual = data_processor.X_test_standardized_rowwise[index].reshape(1, -1)
@@ -188,23 +255,257 @@ if st.session_state.get('visualization'):
         encoded_no_train = autoencoder.encoder.predict(actual)
         estimated_no_train = autoencoder.decoder.predict(encoded_no_train)
 
-        # Load saved weights
-        autoencoder.load_from_indicator('20d_correct_scaling_100epochs')
+        # keep track of if the model has been trained
+        # if so, we plot the model twice - before & after
+        # otherwise, we just plot the before
+        model_trained = False
 
-        # Compare actual & reconstructed after training
-        encoded = autoencoder.encoder.predict(actual)
-        estimated = autoencoder.decoder.predict(encoded)
+        if file_dropdown == 'Upload weights files':
+            
+            # User input for weights files
+            with st.form('File Upload'):
+                encoder_weights = st.file_uploader('Encoder Weights')
+                decoder_weights = st.file_uploader('Decoder Weights')
+                submitted = st.form_submit_button('Submit')
 
-        st.line_chart(pd.DataFrame(
+            if submitted:
+
+                # file names (same as uploaded) to be used in ZIP download
+                encoder_name = encoder_weights.name.rstrip('h5')
+                decoder_name = decoder_weights.name.rstrip('h5')
+
+                # convert bytes to temporary file object
+                encoder_bytes = encoder_weights.getvalue()
+                decoder_bytes = decoder_weights.getvalue()
+
+                # load encoder weights
+                with tempfile.NamedTemporaryFile(suffix='.h5', mode='wb+', delete=False) as f:
+                    f.write(encoder_bytes)
+                    f.flush()
+                    encoder_filename = f.name
+
+                # load decoder weights
+                with tempfile.NamedTemporaryFile(suffix='.h5', mode='wb+', delete=False) as f:
+                    f.write(decoder_bytes)
+                    f.flush()
+                    decoder_filename = f.name
+                    
+                # load weights from tempfiles
+                autoencoder.encoder.load_weights(encoder_filename)
+                autoencoder.decoder.load_weights(decoder_filename)
+
+                # delete tempfiles
+                # files must be deleted seperately from the with statement
+                # because loading weights while in write more is not possible
+                os.remove(encoder_filename)
+                os.remove(decoder_filename)
+
+                model_trained = True
+
+        elif file_dropdown == 'Train new model':
+
+            # User input for weights files
+            with st.form('Training Parameters'):
+                epochs = st.slider(label='Epochs',
+                                   min_value=1, max_value=200, value=25)
+                batch_size = st.slider(label='Batch Size',
+                                    min_value=1, max_value=data_processor.X_train.shape[0], value=50)
+                submitted = st.form_submit_button('Submit')
+
+                # by default, model name is based on parameters but can be modified.
+                # used for deciding filename of the download button
+                encoder_name = st.text_input(label='Choose your model name',
+                                        value=f'trained_encoder_{epochs}-epoch_{batch_size}-batch',
+                                        max_chars=100)
+                decoder_name = st.text_input(label='Choose your model name',
+                                        value=f'trained_decoder_{epochs}-epoch_{batch_size}-batch',
+                                        max_chars=100)
+
+            # train the model
+            if submitted:
+                with st.spinner(text='Training...'):
+                    model_history, _ = autoencoder.train_model(epochs=epochs, batch_size=batch_size, verbose=1)
+                model_trained = True
+
+
+        if not model_trained:
+            st.line_chart(pd.DataFrame(
             {'Actual': actual[0],
-             'Reconstructed (Before Training)': estimated_no_train[0],
-             'Reconstructed (After Training)': estimated[0]}
-        ))
+             'Reconstructed (Before Training)': estimated_no_train[0],}
+            ))
 
+        else:
+            # Compare actual & reconstructed after training
+            encoded = autoencoder.encoder.predict(actual)
+            estimated = autoencoder.decoder.predict(encoded)
 
-    else:
+            st.line_chart(pd.DataFrame(
+                {'Actual': actual[0],
+                'Reconstructed (Before Training)': estimated_no_train[0],
+                'Reconstructed (After Training)': estimated[0]}
+            ))
+
+            # show loss if model history exists
+            if file_dropdown == 'Train new model':
+                f"""
+                Loss: {model_history.history['loss'][-1]}
+                """
+
+            # open multiple tempfiles
+            with tempfile.NamedTemporaryFile(suffix='.h5', mode='wb+', delete=False) as ef, \
+                 tempfile.NamedTemporaryFile(suffix='.h5', mode='wb+', delete=False) as df:
+                
+                encoder_file = ef.name
+                decoder_file = df.name
+
+            # save weights to the given tempfiles
+            autoencoder.save_weights(encoder_file, decoder_file)
+
+            # since download button refreshes page, meaning model will have to be reconstructed
+            #   we want to download it all at once. Since download_button only supports 1 at a time,
+            #   we must pack them into a ZIP file to avoid unnecessary re-training
+
+            # read bytes data from saved weights temp files
+            with open(encoder_file, 'rb') as ef, open(decoder_file, 'rb') as df:
+                encoder_data = ef.read()
+                decoder_data = df.read()
+
+            # pack our 2 files into a ZIP, resetting buffer position
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+                zip_file.writestr(f'{encoder_name}.h5', encoder_data)
+                zip_file.writestr(f'{decoder_name}.h5', decoder_data)
+            zip_buffer.seek(0)
+
+            # create download button for ZIP
+            st.download_button(
+                label="Download Encoder and Decoder Models",
+                data=zip_buffer,
+                file_name="models.zip",
+                mime="application/zip"
+            )
+            
+            # TODO: implement download weights button with TF .h5 format
+
+    # --------------------------------------
+    # -------------    GMM    --------------
+    # --------------------------------------
+
+    elif vis_dropdown == 'GMM':
         """
-        ### TODO
+        ### GMMs for Clustering
 
-        Not yet implemented!
+        GMMs (Gaussian Mixture Models) represent a dataset as a mix of several gaussian distributions, each corresponding to a cluster. The reason I considered
+        GMMs initially over another clustering model like K-means is because K-means uses hard clustering (each point belongs to one cluster only) while GMMs use soft
+        clustering (each point has a probability of being in each cluster), and shapes other than just spheres. However, one big drawback is how slow GMMs are to train.
         """
+        # Allow users to upload their own weights or train a new model
+        # because it takes a long time to fit GMM
+        file_dropdown = st.selectbox(label='How to create model',
+                                     options=['Upload model files', 'Train (Not recommended)'],
+                                     index=None)
+        gmm_trained = False
+        
+        # Don't load PCA and gmm if nothing is selected
+        if file_dropdown is not None:
+
+            with st.spinner('Initializing PCA...'):
+                pca = initialize_pca(data_processor)
+            index = np.random.randint(data_processor.X_test_standardized_rowwise.shape[0])
+
+            # use PCA for dimensionality reduction (for now at least)
+            # because we can store locally rather than needing to store/load an autoencoder
+            actual = data_processor.X_test_standardized_rowwise[index].reshape(1, -1)
+            encoded = pca.encode_input_data(actual)
+
+            with st.spinner('Loading GMM...'):
+                gmm = GMM(
+                    X_train = pca.encode_input_data(data_processor.X_train_standardized_rowwise),
+                    X_val   = pca.encode_input_data(data_processor.X_val_standardized_rowwise),
+                    X_test  = pca.encode_input_data(data_processor.X_test_standardized_rowwise),
+                    y_train = data_processor.y_train_standardized_columnwise,
+                    y_val   = data_processor.y_val_standardized_columnwise,
+                    y_test  = data_processor.y_test_standardized_columnwise,
+                )
+        
+        # upload model .pkl files
+        if file_dropdown == 'Upload model files':
+
+            # File user input
+            with st.form('File Upload'):
+                gmm_upload = st.file_uploader('GMM .pkl File')
+                submitted = st.form_submit_button('Submit')
+
+            if submitted:
+
+                # load as bytes object
+                gmm_name = gmm_upload.name.rstrip('.pkl')
+                gmm_bytes = gmm_upload.getvalue()
+
+                # load into temporary file
+                with tempfile.NamedTemporaryFile(suffix='.pkl', mode='wb+', delete=False) as f:
+                    f.write(gmm_bytes)
+                    f.flush()
+                    gmm_filename = f.name
+
+                # load weights from tempfiles
+                gmm.load_from_path(gmm_filename)
+                gmm_trained = True
+
+                # delete tempfile
+                os.remove(gmm_filename)
+            
+
+        elif file_dropdown == 'Train (Not recommended)':
+            """
+            NOTE: With such a small traning amount, the model will not be very effective. To see a fully effective model, upload your own model pkl file.
+            Training for longer max iterations and components will take much longer, but will lead to better results, as an alternative to uploading.
+            """
+            # User input for training parameters
+            with st.form('Training Parameters'):
+                max_iter = st.slider(label='Max Iterations',
+                                   min_value=1, max_value=100, value=10)
+                components = st.slider(label='Components',
+                                    min_value=1, max_value=50, value=15)
+                covariance_type = st.selectbox(
+                    label='Covariance Type', options=['full', 'tied', 'diag', 'spherical'], index=0
+                )
+
+                # by default, model name is based on parameters but can be modified.
+                # used for deciding filename of the download button
+                gmm_name = st.text_input(label='Choose your model name',
+                                        value=f'trained_gmm_{components}-component_{covariance_type}-covar_{max_iter}-iter',
+                                        max_chars=100)
+                
+                submitted = st.form_submit_button('Submit')
+
+            if submitted:
+                with st.spinner('Training GMM...'):
+                    config = {
+                        'n_components' : components,            # Cluster count
+                        'covariance_type' : covariance_type,    # full, tied, spherical, diag
+                        'max_iter' : max_iter,                  # Max EM steps to do
+                        'n_init' : 1,                           # Number of initializations to make
+                        'verbose': 1,
+                    }
+                    gmm.build_model(config)
+                    gmm.train_model()
+                    gmm_trained = True
+            
+        # Again, only plot if the GMM has been trained
+        if gmm_trained:
+            predicted_y = gmm.predict(encoded)
+            actual_y = data_processor.y_test[index]
+
+            st.bar_chart(pd.DataFrame(
+                {'Actual': actual_y,
+                'Predicted': predicted_y[0]}
+            ), stack=False)
+
+            # show button to download GMM model, whether trained or uploaded
+            # read data as bytes then make st.download_button with specified file name
+            gmm_bytesio = io.BytesIO()
+            gmm.save_to_path(gmm_bytesio)
+
+            gmm_bytes_data = gmm_bytesio.getvalue()
+            st.download_button("Download GMM .pkl file", gmm_bytes_data, file_name=f'{gmm_name}.pkl')
