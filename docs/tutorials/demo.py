@@ -136,6 +136,7 @@ def initialize_pca(data_processor) -> PCAModel:
         y_test  = data_processor.y_test_standardized_columnwise,
     )
     pca.build_model({'n_components': .999})
+    pca.train_model()
     return pca
 
 
@@ -398,6 +399,7 @@ if st.session_state.get('visualization'):
         GMMs (Gaussian Mixture Models) represent a dataset as a mix of several gaussian distributions, each corresponding to a cluster. The reason I considered
         GMMs initially over another clustering model like K-means is because K-means uses hard clustering (each point belongs to one cluster only) while GMMs use soft
         clustering (each point has a probability of being in each cluster), and shapes other than just spheres. However, one big drawback is how slow GMMs are to train.
+        Here, we use PCA to encode our input into clusterable dimensions. To try autoencoders, use these modules in your code.
         """
         # Allow users to upload their own weights or train a new model
         # because it takes a long time to fit GMM

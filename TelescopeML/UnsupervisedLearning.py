@@ -176,6 +176,28 @@ class Autoencoder:
         self.decoder = decoder
         self.autoencoder = Model(inputs=self.encoder.input, outputs=self.decoder(self.encoder.output))
 
+    
+    def encode_input_data(self, dataset):
+        """
+        Return encoded input data (either using pre-existing set or new dataset)
+        """
+        key = {'train': self.X_train, 'val': self.X_val, 'test': self.X_test}
+        
+        # can either pass in own data of shape (x, 104) or use pre-existing set
+        if type(key) == str and dataset in key:
+            relevant_data = key[dataset]
+        else:
+            relevant_data = dataset
+
+        return self.encoder.predict(relevant_data)
+    
+
+    def decode_output_data(self, encoded_data):
+        """
+        Reconstructs original 104D data from given encoded data
+        """
+        return self.decoder.predict(encoded_data)
+
 
     def train_model(self, epochs, batch_size, verbose):
         """
@@ -247,6 +269,11 @@ class PCAModel:
         # n_components can either be > 1 (how many PCs to keep)
         #   or 0 < n < 1 (what % of variability to preserve)
         self.pca = PCA(n_components)
+
+    def train_model(self):
+        """
+        Fit PCA Model with given dataset
+        """
         self.pca.fit(self.X_train)
 
 
